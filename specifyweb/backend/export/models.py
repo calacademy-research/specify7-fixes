@@ -1,4 +1,6 @@
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.utils import timezone
 
 
@@ -95,3 +97,14 @@ class CacheTableMeta(models.Model):
 
     class Meta:
         db_table = 'cachetablemeta'
+
+
+@receiver(post_delete, sender=SchemaMapping)
+def delete_schema_mapping_cache(sender, instance, **kwargs):
+    """Drop cache table when a SchemaMapping is deleted."""
+    from .cache import drop_cache_table
+    for meta in CacheTableMeta.objects.filter(schemamapping=instance):
+        try:
+            drop_cache_table(meta.tablename)
+        except Exception:
+            pass
