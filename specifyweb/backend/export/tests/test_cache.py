@@ -3,6 +3,7 @@ from django.test import TestCase, TransactionTestCase
 
 from specifyweb.backend.export.cache import (
     create_cache_table, drop_cache_table, get_cache_table_name,
+    _build_single_cache, _sanitize_column_name, cleanup_orphan_caches,
 )
 
 
@@ -47,3 +48,131 @@ class CacheTableOperationsTests(TransactionTestCase):
         safe_name = 'testdroptable'
         self.assertTrue(self._table_exists(safe_name))
         drop_cache_table(safe_name)
+
+
+class SanitizeColumnNameTests(TestCase):
+
+    def test_simple_name(self):
+        self.assertEqual(_sanitize_column_name('catalogNumber'), 'catalogNumber')
+
+    def test_uri_with_slash(self):
+        self.assertEqual(
+            _sanitize_column_name('http://rs.tdwg.org/dwc/terms/catalogNumber'),
+            'catalogNumber',
+        )
+
+    def test_uri_with_hash(self):
+        self.assertEqual(
+            _sanitize_column_name('http://purl.org/dc/terms#modified'),
+            'modified',
+        )
+
+    def test_special_chars_replaced(self):
+        self.assertEqual(_sanitize_column_name('some-field.name'), 'some_field_name')
+
+    def test_truncation_at_64(self):
+        long_name = 'a' * 100
+        self.assertEqual(len(_sanitize_column_name(long_name)), 64)
+
+
+class BuildSingleCacheTests(TransactionTestCase):
+
+    def _table_exists(self, name):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_name = %s", [name]
+            )
+            return cursor.fetchone()[0] > 0
+
+    def _get_columns(self, table_name):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = %s ORDER BY ordinal_position", [table_name]
+            )
+            return [row[0] for row in cursor.fetchall()]
+
+    def _make_test_objects(self):
+        """Create minimal DB objects needed for cache tests."""
+        from specifyweb.specify.models import (
+            Institution, Division, Discipline, Collection,
+            Specifyuser, Spquery, Spqueryfield,
+        )
+        from specifyweb.backend.export.models import SchemaMapping
+
+        institution = Institution.objects.create(
+            name='CacheTestInst',
+            isaccessionsglobal=True,
+            issecurityon=False,
+            isserverbased=False,
+            issharinglocalities=True,
+            issinglegeographytree=True,
+        )
+        division = Division.objects.create(
+            name='CacheTestDiv', institution=institution,
+        )
+        discipline = Discipline.objects.create(
+            name='CacheTestDisc', type='fish', division=division,
+        )
+        collection = Collection.objects.create(
+            catalognumformatname='test', collectionname='CacheTestColl',
+            discipline=discipline, isembeddedcollectingevent=False,
+        )
+        specifyuser = Specifyuser.objects.create(
+            name='testcacheuser', isloggedin=False, isloggedinreport=False,
+        )
+
+        query = Spquery.objects.create(
+            name='cache_test_q', contextname='CollectionObject',
+            contexttableid=1, specifyuser=specifyuser,
+        )
+        Spqueryfield.objects.create(
+            query=query, fieldname='catalogNumber', operstart=0,
+            sorttype=0, position=0, startvalue='',
+            stringid='1.collectionobject.catalogNumber', tablelist='1',
+            term='http://rs.tdwg.org/dwc/terms/catalogNumber',
+        )
+        Spqueryfield.objects.create(
+            query=query, fieldname='locality', operstart=0,
+            sorttype=0, position=1, startvalue='',
+            stringid='1.collectionobject.locality', tablelist='1',
+            term='http://rs.tdwg.org/dwc/terms/locality',
+        )
+        mapping = SchemaMapping.objects.create(
+            query=query, mappingtype='Core', name='Cache Test Mapping',
+        )
+        return mapping, collection
+
+    def test_build_single_cache(self):
+        """Verify cache table is created with correct columns."""
+        mapping, collection = self._make_test_objects()
+
+        table_name = get_cache_table_name(mapping.id, collection.id)
+        try:
+            _build_single_cache(mapping, collection)
+            self.assertTrue(self._table_exists(table_name))
+
+            columns = self._get_columns(table_name)
+            self.assertIn('occurrence_id', columns)
+            self.assertIn('catalogNumber', columns)
+            self.assertIn('locality', columns)
+
+            # Verify CacheTableMeta was created
+            from specifyweb.backend.export.models import CacheTableMeta
+            meta = CacheTableMeta.objects.get(schemamapping=mapping)
+            self.assertEqual(meta.buildstatus, 'idle')
+            self.assertEqual(meta.rowcount, 0)
+            self.assertIsNotNone(meta.lastbuilt)
+        finally:
+            drop_cache_table(table_name)
+
+    def test_cleanup_orphan_caches(self):
+        """Create an orphan cache table and verify cleanup removes it."""
+        orphan_table = 'dwc_cache_orphan_999'
+        create_cache_table(orphan_table, [('id', 'INT')])
+        self.assertTrue(self._table_exists(orphan_table))
+
+        cleanup_orphan_caches()
+
+        self.assertFalse(self._table_exists(orphan_table))
