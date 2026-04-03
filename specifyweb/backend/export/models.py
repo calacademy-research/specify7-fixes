@@ -33,3 +33,65 @@ class SchemaMapping(models.Model):
 
     class Meta:
         db_table = 'schemamapping'
+
+
+class ExportDataSet(models.Model):
+    id = models.AutoField(primary_key=True, db_column='ExportDataSetID')
+    exportname = models.CharField(max_length=256, unique=True, db_column='ExportName')
+    filename = models.CharField(max_length=256, unique=True, db_column='FileName')
+    isrss = models.BooleanField(default=False, db_column='IsRSS')
+    frequency = models.IntegerField(blank=True, null=True, db_column='Frequency')
+    metadata = models.ForeignKey(
+        'specify.Spappresource', db_column='MetadataID',
+        related_name='+', null=True, blank=True, on_delete=models.SET_NULL,
+    )
+    coremapping = models.ForeignKey(
+        'SchemaMapping', db_column='CoreMappingID',
+        related_name='export_datasets', on_delete=models.PROTECT,
+    )
+    collection = models.ForeignKey(
+        'specify.Collection', db_column='CollectionID',
+        related_name='+', on_delete=models.CASCADE,
+    )
+    lastexported = models.DateTimeField(blank=True, null=True, db_column='LastExported')
+    timestampcreated = models.DateTimeField(default=timezone.now, db_column='TimestampCreated')
+    timestampmodified = models.DateTimeField(default=timezone.now, db_column='TimestampModified')
+    version = models.IntegerField(default=0, db_column='Version')
+
+    class Meta:
+        db_table = 'exportdataset'
+
+
+class ExportDataSetExtension(models.Model):
+    id = models.AutoField(primary_key=True, db_column='ExportDataSetExtensionID')
+    exportdataset = models.ForeignKey(
+        'ExportDataSet', db_column='ExportDataSetID',
+        related_name='extensions', on_delete=models.CASCADE,
+    )
+    schemamapping = models.ForeignKey(
+        'SchemaMapping', db_column='SchemaMappingID',
+        related_name='dataset_extensions', on_delete=models.PROTECT,
+    )
+    sortorder = models.IntegerField(default=0, db_column='SortOrder')
+
+    class Meta:
+        db_table = 'exportdatasetextension'
+        unique_together = [('exportdataset', 'schemamapping')]
+
+
+class CacheTableMeta(models.Model):
+    id = models.AutoField(primary_key=True, db_column='CacheTableMetaID')
+    schemamapping = models.OneToOneField(
+        'SchemaMapping', db_column='SchemaMappingID',
+        related_name='cache_meta', on_delete=models.CASCADE,
+    )
+    tablename = models.CharField(max_length=128, unique=True, db_column='TableName')
+    lastbuilt = models.DateTimeField(blank=True, null=True, db_column='LastBuilt')
+    rowcount = models.IntegerField(blank=True, null=True, db_column='RowCount')
+    buildstatus = models.CharField(
+        max_length=16, default='idle', db_column='BuildStatus',
+        choices=[('idle', 'idle'), ('building', 'building'), ('error', 'error')],
+    )
+
+    class Meta:
+        db_table = 'cachetablemeta'

@@ -3,7 +3,9 @@ from django.test import TestCase
 
 from specifyweb.specify.tests.test_api import MainSetupTearDown
 from specifyweb.specify.models import Spquery, Spqueryfield
-from specifyweb.backend.export.models import SchemaMapping
+from specifyweb.backend.export.models import (
+    SchemaMapping, ExportDataSet, ExportDataSetExtension, CacheTableMeta,
+)
 
 
 class SchemaMappingTests(MainSetupTearDown, TestCase):
@@ -111,3 +113,70 @@ class SchemaMappingTests(MainSetupTearDown, TestCase):
         field_static.refresh_from_db()
         self.assertTrue(field_static.isstatic)
         self.assertEqual(field_static.staticvalue, 'PreservedSpecimen')
+
+
+class ExportDataSetTests(MainSetupTearDown, TestCase):
+
+    def _make_mapping(self, name='test mapping'):
+        query = Spquery.objects.create(
+            name='q',
+            contextname='CollectionObject',
+            contexttableid=1,
+            createdbyagent=self.agent,
+            specifyuser=self.specifyuser,
+        )
+        return SchemaMapping.objects.create(
+            query=query, mappingtype='Core', name=name,
+        )
+
+    def test_create_export_dataset(self):
+        mapping = self._make_mapping()
+        ds = ExportDataSet.objects.create(
+            exportname='My Export',
+            filename='export.zip',
+            coremapping=mapping,
+            collection=self.collection,
+        )
+        ds.refresh_from_db()
+        self.assertEqual(ds.exportname, 'My Export')
+        self.assertEqual(ds.filename, 'export.zip')
+        self.assertFalse(ds.isrss)
+        self.assertIsNone(ds.frequency)
+        self.assertIsNone(ds.lastexported)
+        self.assertEqual(ds.coremapping_id, mapping.pk)
+        self.assertEqual(ds.collection_id, self.collection.pk)
+        self.assertEqual(ds.version, 0)
+
+    def test_export_dataset_extension(self):
+        core = self._make_mapping('core')
+        ext_mapping = self._make_mapping('ext')
+        ds = ExportDataSet.objects.create(
+            exportname='DS', filename='ds.zip',
+            coremapping=core, collection=self.collection,
+        )
+        ext = ExportDataSetExtension.objects.create(
+            exportdataset=ds, schemamapping=ext_mapping, sortorder=1,
+        )
+        ext.refresh_from_db()
+        self.assertEqual(ext.exportdataset_id, ds.pk)
+        self.assertEqual(ext.schemamapping_id, ext_mapping.pk)
+        self.assertEqual(ext.sortorder, 1)
+
+        # unique_together enforced
+        with self.assertRaises(IntegrityError):
+            ExportDataSetExtension.objects.create(
+                exportdataset=ds, schemamapping=ext_mapping, sortorder=2,
+            )
+
+    def test_cache_table_meta(self):
+        mapping = self._make_mapping()
+        meta = CacheTableMeta.objects.create(
+            schemamapping=mapping,
+            tablename='dwc_cache_1_4',
+        )
+        meta.refresh_from_db()
+        self.assertEqual(meta.schemamapping_id, mapping.pk)
+        self.assertEqual(meta.tablename, 'dwc_cache_1_4')
+        self.assertIsNone(meta.lastbuilt)
+        self.assertIsNone(meta.rowcount)
+        self.assertEqual(meta.buildstatus, 'idle')
