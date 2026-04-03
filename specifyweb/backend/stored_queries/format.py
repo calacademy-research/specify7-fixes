@@ -200,13 +200,6 @@ class ObjectFormatter:
                 formatter,
                 aggregator, previous_tables)
 
-            # Unwrap blank_nulls so that apply_stringish sees the raw
-            # expression.  This lets concat(sep, expr) return NULL when the
-            # nested formatter produced NULL, so the outer blank_nulls
-            # correctly suppresses both the value and its separator.
-            # See issue #6406.
-            if isinstance(new_expr, blank_nulls):
-                new_expr = new_expr.clauses.clauses[0]
             raw_expr = new_expr
         else:
             new_query, table, model, specify_field = query.build_join(
@@ -247,7 +240,17 @@ class ObjectFormatter:
 
             sep = fieldNodeAttrib.get('sep')
             if sep is not None:
-                e = concat(sep, e)
+                # For relationship fields, blank_nulls converts NULL to ''.
+                # A plain concat(sep, '') would leak the separator even when
+                # the related object is absent.  Use CASE to suppress the
+                # separator when the formatted value is empty.  See #6406.
+                if formatter_field_spec.is_relationship():
+                    e = case(
+                        (cast(e, types.String()) != literal(''), concat(sep, e)),
+                        else_=e
+                    )
+                else:
+                    e = concat(sep, e)
 
             return e
 
