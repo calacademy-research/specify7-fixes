@@ -1,5 +1,5 @@
 from django.db import connection
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 
 from specifyweb.backend.export.cache import (
     create_cache_table, drop_cache_table, get_cache_table_name,
@@ -20,7 +20,7 @@ class CacheTableNameTests(TestCase):
         self.assertIn('bad', name)
 
 
-class CacheTableOperationsTests(TestCase):
+class CacheTableOperationsTests(TransactionTestCase):
 
     def _table_exists(self, name):
         with connection.cursor() as cursor:
