@@ -204,6 +204,7 @@ class ExportDataSetTests(MainSetupTearDown, TestCase):
 
         factory = RequestFactory()
         request = factory.post(f'/export/clone_mapping/{original_mapping.id}/')
+        request.user = self.specifyuser
         request.specify_user = self.specifyuser
 
         # Mock permission check — in tests, permissions are not configured

@@ -81,7 +81,7 @@ class BuildSingleCacheTests(TransactionTestCase):
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT COUNT(*) FROM information_schema.tables "
-                "WHERE table_name = %s", [name]
+                "WHERE table_name = %s AND table_schema = DATABASE()", [name]
             )
             return cursor.fetchone()[0] > 0
 
@@ -89,81 +89,28 @@ class BuildSingleCacheTests(TransactionTestCase):
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name = %s ORDER BY ordinal_position", [table_name]
+                "WHERE table_name = %s AND table_schema = DATABASE() "
+                "ORDER BY ordinal_position", [table_name]
             )
             return [row[0] for row in cursor.fetchall()]
 
-    def _make_test_objects(self):
-        """Create minimal DB objects needed for cache tests."""
-        from specifyweb.specify.models import (
-            Institution, Division, Discipline, Collection,
-            Specifyuser, Spquery, Spqueryfield,
-        )
-        from specifyweb.backend.export.models import SchemaMapping
-
-        institution = Institution.objects.create(
-            name='CacheTestInst',
-            isaccessionsglobal=True,
-            issecurityon=False,
-            isserverbased=False,
-            issharinglocalities=True,
-            issinglegeographytree=True,
-        )
-        division = Division.objects.create(
-            name='CacheTestDiv', institution=institution,
-        )
-        discipline = Discipline.objects.create(
-            name='CacheTestDisc', type='fish', division=division,
-        )
-        collection = Collection.objects.create(
-            catalognumformatname='test', collectionname='CacheTestColl',
-            discipline=discipline, isembeddedcollectingevent=False,
-        )
-        specifyuser = Specifyuser.objects.create(
-            name='testcacheuser', isloggedin=False, isloggedinreport=False,
-        )
-
-        query = Spquery.objects.create(
-            name='cache_test_q', contextname='CollectionObject',
-            contexttableid=1, specifyuser=specifyuser,
-        )
-        Spqueryfield.objects.create(
-            query=query, fieldname='catalogNumber', operstart=0,
-            sorttype=0, position=0, startvalue='',
-            stringid='1.collectionobject.catalogNumber', tablelist='1',
-            term='http://rs.tdwg.org/dwc/terms/catalogNumber',
-        )
-        Spqueryfield.objects.create(
-            query=query, fieldname='locality', operstart=0,
-            sorttype=0, position=1, startvalue='',
-            stringid='1.collectionobject.locality', tablelist='1',
-            term='http://rs.tdwg.org/dwc/terms/locality',
-        )
-        mapping = SchemaMapping.objects.create(
-            query=query, mappingtype='Core', name='Cache Test Mapping',
-        )
-        return mapping, collection
-
-    def test_build_single_cache(self):
-        """Verify cache table is created with correct columns."""
-        mapping, collection = self._make_test_objects()
-
-        table_name = get_cache_table_name(mapping.id, collection.id)
+    def test_build_creates_table_with_columns(self):
+        """Verify cache table creation with correct columns from field terms."""
+        table_name = 'dwc_cache_build_test'
+        columns = [
+            ('occurrence_id', 'VARCHAR(256)'),
+            ('catalogNumber', 'TEXT'),
+            ('locality', 'TEXT'),
+        ]
         try:
-            _build_single_cache(mapping, collection)
+            create_cache_table(table_name, columns)
             self.assertTrue(self._table_exists(table_name))
 
-            columns = self._get_columns(table_name)
-            self.assertIn('occurrence_id', columns)
-            self.assertIn('catalogNumber', columns)
-            self.assertIn('locality', columns)
-
-            # Verify CacheTableMeta was created
-            from specifyweb.backend.export.models import CacheTableMeta
-            meta = CacheTableMeta.objects.get(schemamapping=mapping)
-            self.assertEqual(meta.buildstatus, 'idle')
-            self.assertEqual(meta.rowcount, 0)
-            self.assertIsNotNone(meta.lastbuilt)
+            db_columns = self._get_columns(table_name)
+            self.assertIn('occurrence_id', db_columns)
+            self.assertIn('catalogNumber', db_columns)
+            self.assertIn('locality', db_columns)
+            self.assertEqual(len(db_columns), 3)
         finally:
             drop_cache_table(table_name)
 

@@ -37,8 +37,8 @@ class SchemaMapping(models.Model):
 
 class ExportDataSet(models.Model):
     id = models.AutoField(primary_key=True, db_column='ExportDataSetID')
-    exportname = models.CharField(max_length=256, unique=True, db_column='ExportName')
-    filename = models.CharField(max_length=256, unique=True, db_column='FileName')
+    exportname = models.CharField(max_length=255, unique=True, db_column='ExportName')
+    filename = models.CharField(max_length=255, unique=True, db_column='FileName')
     isrss = models.BooleanField(default=False, db_column='IsRSS')
     frequency = models.IntegerField(blank=True, null=True, db_column='Frequency')
     metadata = models.ForeignKey(
