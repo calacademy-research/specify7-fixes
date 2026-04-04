@@ -214,15 +214,14 @@ class ObjectFormatter:
                     formatter_field_spec.get_field(),
                     new_expr
                 )
-            elif specify_field.is_temporal():
+            elif specify_field.is_temporal() and do_blank_null:
                 # When full field formatting is disabled, still apply
-                # precision-aware date formatting for temporal fields.
-                # Without this, date fields in object formatters ignore
-                # precision and display the raw date (e.g. "2024-01-01"
-                # instead of "2024" for year-only precision).
+                # precision-aware date formatting for temporal fields
+                # in display context (do_blank_null=True). Skip for
+                # ORDER BY context (do_blank_null=False) so aggregation
+                # sorts by raw timestamp, not formatted string.
                 # See: https://github.com/specify/specify7/issues/7376
                 new_expr = self._dateformat(specify_field, new_expr)
-                raw_expr = new_expr
 
         # Helper function to apply only string-ish transforms with no numeric casts
         def apply_stringish(expr):
