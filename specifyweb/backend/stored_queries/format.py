@@ -249,7 +249,17 @@ class ObjectFormatter:
 
             sep = fieldNodeAttrib.get('sep')
             if sep is not None:
-                e = concat(sep, e)
+                # For relationship fields, blank_nulls converts NULL to ''.
+                # A plain concat(sep, '') would leak the separator even when
+                # the related object is absent.  Use CASE to suppress the
+                # separator when the formatted value is empty.  See #6406.
+                if formatter_field_spec.is_relationship():
+                    e = case(
+                        (cast(e, types.String()) != literal(''), concat(sep, e)),
+                        else_=e
+                    )
+                else:
+                    e = concat(sep, e)
 
             return e
 
