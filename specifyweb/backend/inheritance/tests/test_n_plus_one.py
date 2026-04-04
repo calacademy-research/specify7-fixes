@@ -24,7 +24,7 @@ from specifyweb.backend.inheritance.api import (
 class _FakeFieldSpec:
     """Minimal stand-in for the field_specs entries used by the inheritance API."""
 
-    def __init__(self, name, op_num=1):
+    def __init__(self, name, op_num=1, has_join_path=True):
         self.op_num = op_num
 
         class _JoinPathItem:
@@ -35,13 +35,21 @@ class _FakeFieldSpec:
             def __init__(self, n):
                 self.join_path = [_JoinPathItem(n)]
 
-        self.fieldspec = _Inner(name)
+        class _NoJoinPath:
+            join_path = []
+
+        self.fieldspec = _Inner(name) if has_join_path else _NoJoinPath()
 
 
 def _make_field_specs():
-    """Return a field_specs list where index 1 is catalogNumber (op_num=1)."""
+    """Return field_specs where catalogNumber is at result index 1.
+
+    The id field has no join_path (it's the implicit row-id column at index 0).
+    catalogNumber is the first field with a join_path, so
+    catalog_number_field_index = 0 + 1 = 1, matching our (id, catnum) tuples.
+    """
     return [
-        _FakeFieldSpec('id'),
+        _FakeFieldSpec('id', has_join_path=False),
         _FakeFieldSpec('catalogNumber', op_num=1),
     ]
 
