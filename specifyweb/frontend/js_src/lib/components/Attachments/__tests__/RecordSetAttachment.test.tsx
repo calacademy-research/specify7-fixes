@@ -17,6 +17,7 @@ beforeEach(() => {
 describe('RecordSetAttachments', () => {
   test('Download All button is disabled when there are no attachments', async () => {
     jest.spyOn(console, 'warn').mockImplementation();
+    jest.spyOn(console, 'error').mockImplementation();
 
     const { user } = mount(
       <LoadingContext.Provider value={f.void}>
@@ -31,7 +32,7 @@ describe('RecordSetAttachments', () => {
     );
 
     // Open the attachments dialog
-    const galleryButton = screen.getByTitle('attachments');
+    const galleryButton = screen.getByRole('button', { name: /attachments/i });
     await user.click(galleryButton);
 
     // Wait for the dialog to render with the Download All button
