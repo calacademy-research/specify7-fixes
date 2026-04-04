@@ -31,3 +31,6 @@ node_modules
 /specifyweb/frontend/js_src/dist
 .env
 docker-compose.yml
+.claude/
+DWC_PIPELINE.md
+test_*.csv

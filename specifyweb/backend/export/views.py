@@ -190,3 +190,232 @@ def extract_query(request, query_id):
     """
     query = Spquery.objects.get(id=query_id)
     return HttpResponse(extract(query), 'text/xml')
+
+class SchemaMappingPT(PermissionTarget):
+    resource = "/export/schema_mapping"
+    create = PermissionTargetAction()
+    read = PermissionTargetAction()
+    update = PermissionTargetAction()
+    delete = PermissionTargetAction()
+
+class ExportPackagePT(PermissionTarget):
+    resource = "/export/export_package"
+    create = PermissionTargetAction()
+    read = PermissionTargetAction()
+    execute = PermissionTargetAction()
+
+@require_GET
+@login_maybe_required
+def get_schema_terms(request):
+    """Serve the DwC schema terms vocabulary as JSON."""
+    terms_path = os.path.join(os.path.dirname(__file__), 'schema_terms.json')
+    with open(terms_path) as f:
+        return HttpResponse(f.read(), content_type='application/json')
+
+
+@require_GET
+@login_maybe_required
+def list_mappings(request):
+    """List all schema mappings."""
+    check_permission_targets(None, request.specify_user.id, [SchemaMappingPT.read])
+    from specifyweb.backend.export.models import SchemaMapping
+    mappings = SchemaMapping.objects.all().values('id', 'name', 'mappingtype', 'isdefault', 'query_id')
+    return HttpResponse(json.dumps([
+        {
+            'id': m['id'],
+            'name': m['name'],
+            'mappingType': m['mappingtype'],
+            'isDefault': m['isdefault'],
+            'queryId': m['query_id'],
+        }
+        for m in mappings
+    ]), content_type='application/json')
+
+
+@require_GET
+@login_maybe_required
+def list_export_datasets(request):
+    """List all export datasets."""
+    check_permission_targets(None, request.specify_user.id, [ExportPackagePT.read])
+    from specifyweb.backend.export.models import ExportDataSet
+    datasets = ExportDataSet.objects.all().values(
+        'id', 'exportname', 'filename', 'isrss', 'frequency',
+        'coremapping_id', 'collection_id', 'lastexported'
+    )
+    return HttpResponse(json.dumps([
+        {
+            'id': d['id'],
+            'exportName': d['exportname'],
+            'fileName': d['filename'],
+            'isRss': d['isrss'],
+            'frequency': d['frequency'],
+            'coreMappingId': d['coremapping_id'],
+            'collectionId': d['collection_id'],
+            'lastExported': d['lastexported'].isoformat() if d['lastexported'] else None,
+        }
+        for d in datasets
+    ]), content_type='application/json')
+
+
+@require_POST
+@login_maybe_required
+def clone_mapping(request, mapping_id):
+    """Deep-copy a SchemaMapping: creates new SpQuery with all SpQueryFields,
+    creates new SchemaMapping pointing to the new query."""
+    check_permission_targets(None, request.specify_user.id, [SchemaMappingPT.create])
+
+    from specifyweb.backend.export.models import SchemaMapping
+    from specifyweb.specify.models import Spqueryfield
+
+    try:
+        original = SchemaMapping.objects.select_related('query').get(id=mapping_id)
+    except SchemaMapping.DoesNotExist:
+        raise Http404
+
+    # Clone the SpQuery
+    old_query = original.query
+    new_query = Spquery.objects.create(
+        name=f'Copy of {old_query.name}',
+        contextname=old_query.contextname,
+        contexttableid=old_query.contexttableid,
+        specifyuser=request.specify_user,
+        isfavorite=False,
+        ordinal=old_query.ordinal,
+        searchsynonymy=old_query.searchsynonymy,
+        selectdistinct=old_query.selectdistinct,
+        smushed=old_query.smushed,
+        countonly=old_query.countonly,
+    )
+
+    # Clone all query fields
+    for field in old_query.fields.all():
+        Spqueryfield.objects.create(
+            query=new_query,
+            fieldname=field.fieldname,
+            stringid=field.stringid,
+            tablelist=field.tablelist,
+            operstart=field.operstart,
+            startvalue=field.startvalue,
+            position=field.position,
+            sorttype=field.sorttype,
+            isdisplay=field.isdisplay,
+            isnot=field.isnot,
+            isrelfld=field.isrelfld,
+            formatname=field.formatname,
+            term=field.term,
+            isstatic=field.isstatic,
+            staticvalue=field.staticvalue,
+        )
+
+    # Clone the SchemaMapping
+    new_mapping = SchemaMapping.objects.create(
+        query=new_query,
+        mappingtype=original.mappingtype,
+        name=f'Copy of {original.name}',
+        isdefault=False,
+    )
+
+    return HttpResponse(json.dumps({
+        'id': new_mapping.id,
+        'name': new_mapping.name,
+        'mappingType': new_mapping.mappingtype,
+        'isDefault': False,
+        'queryId': new_query.id,
+    }), content_type='application/json')
+
+
+@require_POST
+@login_maybe_required
+def generate_dwca(request, dataset_id):
+    """Generate a DwCA from an export dataset."""
+    check_permission_targets(None, request.specify_user.id, [ExportPackagePT.execute])
+    from .models import ExportDataSet
+    from .dwca_from_cache import make_dwca_from_dataset
+
+    try:
+        dataset = ExportDataSet.objects.get(id=dataset_id)
+    except ExportDataSet.DoesNotExist:
+        raise Http404
+
+    try:
+        path = make_dwca_from_dataset(dataset)
+        Message.objects.create(
+            user=request.specify_user,
+            content=json.dumps({
+                'type': 'dwca-export-complete',
+                'fileName': dataset.filename,
+                'exportName': dataset.exportname,
+            }),
+        )
+        return HttpResponse(json.dumps({'status': 'ok', 'path': path}),
+                            content_type='application/json')
+    except Exception as e:
+        logger.exception('DwCA generation failed for dataset %s', dataset_id)
+        return HttpResponseBadRequest(json.dumps({'error': str(e)}),
+                                      content_type='application/json')
+
+
+@require_POST
+@login_maybe_required
+def build_cache(request, dataset_id):
+    """Build/rebuild cache tables for an export dataset."""
+    check_permission_targets(None, request.specify_user.id, [ExportPackagePT.execute])
+    from .models import ExportDataSet
+    from .cache import build_cache_tables
+
+    try:
+        dataset = ExportDataSet.objects.get(id=dataset_id)
+    except ExportDataSet.DoesNotExist:
+        raise Http404
+
+    try:
+        build_cache_tables(dataset)
+        return HttpResponse(json.dumps({
+            'status': 'ok', 'datasetId': dataset.id,
+            'exportName': dataset.exportname,
+        }), content_type='application/json')
+    except Exception as e:
+        logger.exception('Cache build failed for dataset %s', dataset_id)
+        return HttpResponseBadRequest(json.dumps({'error': str(e)}),
+                                      content_type='application/json')
+
+
+@require_GET
+@login_maybe_required
+def validate_occurrence_ids(request, mapping_id):
+    """Validate occurrenceID uniqueness in a core mapping's cache table."""
+    check_permission_targets(None, request.specify_user.id, [SchemaMappingPT.read])
+    from .models import SchemaMapping
+    from .cache import validate_occurrence_id_uniqueness
+
+    try:
+        mapping = SchemaMapping.objects.get(id=mapping_id)
+    except SchemaMapping.DoesNotExist:
+        raise Http404
+
+    collection = request.specify_collection
+    duplicates = validate_occurrence_id_uniqueness(mapping, collection)
+    return HttpResponse(json.dumps({
+        'valid': len(duplicates) == 0,
+        'duplicates': duplicates[:20],
+        'totalDuplicates': len(duplicates),
+    }), content_type='application/json')
+
+
+@require_GET
+@login_maybe_required
+def cache_status(request, dataset_id):
+    """Get cache build status for an export dataset."""
+    from .models import ExportDataSet, CacheTableMeta
+
+    try:
+        dataset = ExportDataSet.objects.get(id=dataset_id)
+    except ExportDataSet.DoesNotExist:
+        raise Http404
+
+    meta = CacheTableMeta.objects.filter(schemamapping=dataset.coremapping).first()
+    return HttpResponse(json.dumps({
+        'status': meta.buildstatus if meta else 'idle',
+        'lastBuilt': meta.lastbuilt.isoformat() if meta and meta.lastbuilt else None,
+        'rowCount': meta.rowcount if meta else None,
+    }), content_type='application/json')
