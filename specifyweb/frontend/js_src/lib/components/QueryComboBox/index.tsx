@@ -55,6 +55,12 @@ import { useTreeData } from './useTreeData';
 import { TreeDefinitionContext } from './useTreeData';
 import { useTypeSearch } from './useTypeSearch';
 
+/**
+ * Maximum number of results to fetch for the typeahead dropdown.
+ * Kept low to avoid expensive queries on large tables (200K+ rows).
+ */
+export const QUERY_COMBO_BOX_SEARCH_LIMIT = 50;
+
 /*
  * REFACTOR: split this component
  * TEST: add tests for this
@@ -351,8 +357,7 @@ export function QueryComboBox({
               .map(async (query) =>
                 runQuery<readonly [id: number, label: LocalizedString]>(query, {
                   collectionId: forceCollection ?? relatedCollectionId,
-                  // REFACTOR: allow customizing these arbitrary limits
-                  limit: 1000,
+                  limit: QUERY_COMBO_BOX_SEARCH_LIMIT,
                 })
               )
           ).then((responses) =>
