@@ -181,6 +181,7 @@ export const businessRuleDefs: MappedBusinessRuleDefs = {
           determinations.models.map(async (det) => det.rgetPromise('taxon'))
         );
         const coType = await resource.rgetPromise('collectionObjectType');
+        if (coType === null || coType === undefined) return;
         const coTypeTreeDef = coType.get('taxonTreeDef');
 
         // Block save when a Determination -> Taxon does not belong to the COType's tree definition

@@ -159,6 +159,28 @@ describe('Collection Object business rules', () => {
   overrideAjax(otherCollectionObjectTypeUrl, otherCollectionObjectType);
 
   describe('determinations', () => {
+    test('CollectionObject with null collectionObjectType does not throw (#7870)', async () => {
+      const collectionObject = new tables.CollectionObject.Resource({
+        id: collectionObjectlId,
+        determinations: [
+          {
+            taxon: getResourceApiUrl('Taxon', otherTaxonId),
+            preferredTaxon: getResourceApiUrl('Taxon', otherTaxonId),
+            isCurrent: true,
+          },
+        ],
+        resource_uri: collectionObjectUrl,
+        collectionObjectType: null,
+        catalogNumber: '123',
+      });
+
+      await expect(
+        collectionObject.businessRuleManager?.checkField(
+          'collectionObjectType'
+        )
+      ).resolves.not.toThrow();
+    });
+
     test('CollectionObject -> determinations: Save blocked when a determination does not belong to COT tree', async () => {
       const collectionObject = getBaseCollectionObject();
       collectionObject.set(
