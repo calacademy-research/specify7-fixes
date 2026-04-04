@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('specify', '0044_alter_deletion_cascade'),
+        ('specify', '0045_add_tectonicunit_indexes'),
     ]
 
     operations = [
