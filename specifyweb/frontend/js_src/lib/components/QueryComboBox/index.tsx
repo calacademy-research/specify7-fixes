@@ -63,6 +63,24 @@ import { useTypeSearch } from './useTypeSearch';
  */
 export const QUERY_COMBO_BOX_SEARCH_LIMIT = 50;
 
+/**
+ * Session-scoped preference for how to handle editing shared records (#597).
+ * When set, the warning dialog is skipped and the remembered action is used.
+ */
+const SHARED_EDIT_SESSION_KEY = 'specify-shared-edit-preference';
+type SharedEditPreference = 'cloneAndEdit' | 'editShared';
+
+function getSessionSharedEditPref(): SharedEditPreference | undefined {
+  const value = sessionStorage.getItem(SHARED_EDIT_SESSION_KEY);
+  return value === 'cloneAndEdit' || value === 'editShared'
+    ? value
+    : undefined;
+}
+
+function setSessionSharedEditPref(pref: SharedEditPreference): void {
+  sessionStorage.setItem(SHARED_EDIT_SESSION_KEY, pref);
+}
+
 /*
  * REFACTOR: split this component
  * TEST: add tests for this
@@ -369,6 +387,15 @@ export function QueryComboBox({
         ).then(({ totalCount, records }) => {
           if (totalCount <= 1) {
             setState({ type: 'ViewResourceState', isReadOnly: false });
+            return;
+          }
+
+          // Check session preference — skip dialog if user already chose
+          const sessionPref = getSessionSharedEditPref();
+          if (sessionPref === 'editShared') {
+            setState({ type: 'ViewResourceState', isReadOnly: false });
+          } else if (sessionPref === 'cloneAndEdit') {
+            doCloneAndEdit();
           } else {
             setState({
               type: 'SharedRecordWarningState',
@@ -383,6 +410,20 @@ export function QueryComboBox({
 
     setState({ type: 'ViewResourceState', isReadOnly });
   };
+
+  const doCloneAndEdit = (): void => {
+    loading(
+      formatted!.resource!.clone(true).then((clonedResource) => {
+        resource?.set(field.name, clonedResource as never);
+        setState({
+          type: 'AddResourceState',
+          resource: clonedResource,
+        });
+      })
+    );
+  };
+
+  const [rememberChoice, setRememberChoice] = React.useState(false);
 
   const subViewRelationship = React.useContext(SubViewContext)?.relationship;
   const pendingValueRef = React.useRef('');
@@ -761,24 +802,20 @@ export function QueryComboBox({
                   {commonText.cancel()}
                 </Button.DialogClose>
                 <Button.Info
-                  onClick={(): void =>
-                    setState({ type: 'ViewResourceState', isReadOnly: false })
-                  }
+                  onClick={(): void => {
+                    if (rememberChoice)
+                      setSessionSharedEditPref('editShared');
+                    setState({ type: 'ViewResourceState', isReadOnly: false });
+                  }}
                 >
                   {formsText.editShared()}
                 </Button.Info>
                 <Button.Fancy
-                  onClick={(): void =>
-                    loading(
-                      formatted!.resource!.clone(true).then((clonedResource) => {
-                        resource?.set(field.name, clonedResource as never);
-                        setState({
-                          type: 'AddResourceState',
-                          resource: clonedResource,
-                        });
-                      })
-                    )
-                  }
+                  onClick={(): void => {
+                    if (rememberChoice)
+                      setSessionSharedEditPref('cloneAndEdit');
+                    doCloneAndEdit();
+                  }}
                 >
                   {formsText.cloneAndEdit()}
                 </Button.Fancy>
@@ -850,6 +887,16 @@ export function QueryComboBox({
                 {`\u2026 and ${state.sharingCount - 10} more`}
               </p>
             )}
+            <label className="mt-3 flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                checked={rememberChoice}
+                type="checkbox"
+                onChange={(event): void =>
+                  setRememberChoice(event.target.checked)
+                }
+              />
+              {formsText.rememberChoiceForSession()}
+            </label>
           </Dialog>
         )}
         {typeof formatted?.resource === 'object' &&

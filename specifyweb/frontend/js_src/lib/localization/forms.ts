@@ -52,6 +52,9 @@ export const formsText = createDictionary({
   cloneAndEdit: {
     'en-us': 'Clone and Edit',
   },
+  rememberChoiceForSession: {
+    'en-us': 'Use this choice for the rest of this session',
+  },
   valueMustBeUniqueToField: {
     'en-us': 'Value must be unique to {fieldName:string}',
     'ru-ru': 'Значение должно быть уникальным для {fieldName:string}',
