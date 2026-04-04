@@ -4,6 +4,7 @@ import type { State } from 'typesafe-reducer';
 
 import { useAsyncState } from '../../hooks/useAsyncState';
 import { useResourceValue } from '../../hooks/useResourceValue';
+import { ajax } from '../../utils/ajax';
 import { commonText } from '../../localization/common';
 import { formsText } from '../../localization/forms';
 import { userText } from '../../localization/user';
@@ -222,7 +223,17 @@ export function QueryComboBox({
       >
     | State<'AccessDeniedState', { readonly collectionName: string }>
     | State<'MainState'>
-    | State<'SharedRecordWarningState'>
+    | State<
+        'SharedRecordWarningState',
+        {
+          readonly sharingCount: number;
+          readonly sharingRecords: RA<{
+            readonly coId: number | undefined;
+            readonly coLabel: string | undefined;
+            readonly ceId: number | undefined;
+          }>;
+        }
+      >
     | State<'ViewResourceState', { readonly isReadOnly: boolean }>
   >({ type: 'MainState' });
 
@@ -233,34 +244,145 @@ export function QueryComboBox({
   const targetCollectionId = forceCollection ?? relatedCollectionId;
 
   const loading = React.useContext(LoadingContext);
-  const handleOpenRelated = (isReadOnly: boolean): void =>
-    state.type === 'ViewResourceState' ||
-    state.type === 'AccessDeniedState' ||
-    state.type === 'SharedRecordWarningState'
-      ? setState({ type: 'MainState' })
-      : typeof relatedCollectionId === 'number' &&
-          !userInformation.availableCollections.some(
-            ({ id }) => id === relatedCollectionId
-          )
-        ? loading(
-            fetchResource('Collection', relatedCollectionId).then(
-              (collection) =>
-                setState({
-                  type: 'AccessDeniedState',
-                  collectionName: collection?.collectionName ?? '',
-                })
-            )
-          )
-        : /*
-           * For non-dependent, non-read-only edits, warn the user that
-           * the related record may be shared by other records (#597).
-           * Carry Forward copies foreign keys, so editing a shared
-           * Locality (for example) silently mutates every CO that
-           * references it.
-           */
-          !isReadOnly && !field.isDependent()
-          ? setState({ type: 'SharedRecordWarningState' })
-          : setState({ type: 'ViewResourceState', isReadOnly });
+  const handleOpenRelated = (isReadOnly: boolean): void => {
+    if (
+      state.type === 'ViewResourceState' ||
+      state.type === 'AccessDeniedState' ||
+      state.type === 'SharedRecordWarningState'
+    ) {
+      setState({ type: 'MainState' });
+      return;
+    }
+
+    if (
+      typeof relatedCollectionId === 'number' &&
+      !userInformation.availableCollections.some(
+        ({ id }) => id === relatedCollectionId
+      )
+    ) {
+      loading(
+        fetchResource('Collection', relatedCollectionId).then((collection) =>
+          setState({
+            type: 'AccessDeniedState',
+            collectionName: collection?.collectionName ?? '',
+          })
+        )
+      );
+      return;
+    }
+
+    /*
+     * For non-dependent, non-read-only edits, check if the related
+     * record is shared before allowing direct edits (#597).
+     * Carry Forward copies foreign keys, so editing a shared Locality
+     * (for example) silently mutates every CO that references it.
+     */
+    if (!isReadOnly && !field.isDependent() && formatted?.resource?.id) {
+      const parentTableName = resource!.specifyTable.name.toLowerCase();
+      const fieldName = field.name.toLowerCase();
+      const relatedId = formatted.resource.id;
+
+      /*
+       * Try to resolve back to CollectionObject for the display.
+       * If the QCB is inside a subform (e.g., CE inside CO form),
+       * query COs via the joined path (e.g., collectingevent__locality=X).
+       * Otherwise fall back to querying the direct parent table.
+       */
+      const subView = subViewRelationship;
+      const canResolveToCollectionObject =
+        subView !== undefined &&
+        subView.table.name === 'CollectionObject';
+
+      const queryTable = canResolveToCollectionObject
+        ? 'collectionobject'
+        : parentTableName;
+      const queryFilter = canResolveToCollectionObject
+        ? `${subView!.name.toLowerCase()}__${fieldName}`
+        : fieldName;
+
+      loading(
+        (canResolveToCollectionObject
+          ? /*
+             * Query COs joined through the parent table
+             * (e.g., collectionobject?collectingevent__locality=X)
+             * and also fetch the parent ID for linking.
+             */
+            ajax<{
+              readonly meta: { readonly total_count: number };
+              readonly objects: RA<{
+                readonly id: number;
+                readonly catalogNumber?: string;
+                readonly catalognumber?: string;
+                readonly collectingEvent?: string;
+                readonly collectingevent?: string;
+              }>;
+            }>(
+              `/api/specify/${queryTable}/?${queryFilter}=${relatedId}&limit=11`,
+              { headers: { Accept: 'application/json' } }
+            ).then(({ data }) => ({
+              totalCount: data.meta.total_count,
+              records: data.objects.slice(0, 10).map((obj) => {
+                const barcode =
+                  obj.catalogNumber ?? obj.catalognumber ?? '';
+                const objRecord = obj as Record<string, unknown>;
+                const ceRaw: unknown =
+                  objRecord.collectingevent ??
+                  objRecord.collectingEvent ??
+                  objRecord[subView!.name.toLowerCase()];
+                let ceId: number | undefined;
+                if (
+                  typeof ceRaw === 'object' &&
+                  ceRaw !== null &&
+                  'id' in ceRaw
+                ) {
+                  ceId = (ceRaw as { id: number }).id;
+                } else if (typeof ceRaw === 'string' && ceRaw.includes('/')) {
+                  ceId = Number.parseInt(
+                    ceRaw.split('/').filter(Boolean).pop()!,
+                    10
+                  );
+                } else if (typeof ceRaw === 'number') {
+                  ceId = ceRaw;
+                }
+                return {
+                  coId: obj.id,
+                  coLabel: barcode || `CO #${obj.id}`,
+                  ceId: Number.isNaN(ceId) ? undefined : ceId,
+                };
+              }),
+            }))
+          : /* Fall back to querying the direct parent table */
+            ajax<{
+              readonly meta: { readonly total_count: number };
+              readonly objects: RA<{ readonly id: number }>;
+            }>(
+              `/api/specify/${queryTable}/?${queryFilter}=${relatedId}&limit=11`,
+              { headers: { Accept: 'application/json' } }
+            ).then(({ data }) => ({
+              totalCount: data.meta.total_count,
+              records: data.objects.slice(0, 10).map((obj) => ({
+                coId: undefined as number | undefined,
+                coLabel: undefined as string | undefined,
+                ceId: obj.id,
+              })),
+            }))
+        ).then(({ totalCount, records }) => {
+          if (totalCount <= 1) {
+            setState({ type: 'ViewResourceState', isReadOnly: false });
+          } else {
+            setState({
+              type: 'SharedRecordWarningState',
+              sharingCount: totalCount,
+              sharingRecords: records,
+            });
+          }
+        })
+      );
+      return;
+    }
+
+    setState({ type: 'ViewResourceState', isReadOnly });
+  };
 
   const subViewRelationship = React.useContext(SubViewContext)?.relationship;
   const pendingValueRef = React.useRef('');
@@ -665,9 +787,69 @@ export function QueryComboBox({
             header={formsText.sharedRecordWarning()}
             onClose={(): void => setState({ type: 'MainState' })}
           >
-            {formsText.sharedRecordWarningDescription({
-              tableName: field.relatedTable.label,
-            })}
+            <p>
+              {formsText.sharedRecordWarningDescription({
+                tableName: field.relatedTable.label,
+                count: state.sharingCount.toString(),
+                parentTableName: resource!.specifyTable.label,
+              })}
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              {'Links open in a new tab for inspection only \u2014 no changes will be made.'}
+            </p>
+            {state.sharingRecords.length > 0 && (
+              <table className="mt-2 text-sm w-full">
+                <thead>
+                  <tr className="text-left text-xs text-gray-500">
+                    {state.sharingRecords.some((r) => r.coId !== undefined) && (
+                      <th className="pr-4 font-normal">{'Collection Object'}</th>
+                    )}
+                    <th className="font-normal">{'Collecting Event'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {state.sharingRecords.map((record, index) => (
+                    <tr key={record.coId ?? record.ceId ?? index}>
+                      {state.sharingRecords.some((r) => r.coId !== undefined) && (
+                        <td className="pr-4 py-0.5">
+                          {record.coId !== undefined ? (
+                            <a
+                              className="text-blue-600 underline hover:text-blue-800"
+                              href={`/specify/view/collectionobject/${record.coId}/`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {record.coLabel}
+                            </a>
+                          ) : (
+                            '\u2014'
+                          )}
+                        </td>
+                      )}
+                      <td className="py-0.5">
+                        {record.ceId !== undefined ? (
+                          <a
+                            className="text-blue-600 underline hover:text-blue-800"
+                            href={`/specify/view/collectingevent/${record.ceId}/`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {`CE #${record.ceId}`}
+                          </a>
+                        ) : (
+                          '\u2014'
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {state.sharingCount > 10 && (
+              <p className="mt-1 text-xs text-gray-500">
+                {`\u2026 and ${state.sharingCount - 10} more`}
+              </p>
+            )}
           </Dialog>
         )}
         {typeof formatted?.resource === 'object' &&

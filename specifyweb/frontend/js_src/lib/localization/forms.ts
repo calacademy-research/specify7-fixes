@@ -44,9 +44,7 @@ export const formsText = createDictionary({
     'en-us': 'Shared Record',
   },
   sharedRecordWarningDescription: {
-    'en-us': `This {tableName:string} record may be referenced by other records.
-Editing it will change the data for all records that share it.
-To make changes only for this record, clone it first.`,
+    'en-us': `This {tableName:string} record is shared by {count:string} {parentTableName:string} records. Editing it will change the data for all of them. To make changes only for this record, clone it first.`,
   },
   editShared: {
     'en-us': 'Edit Shared',
