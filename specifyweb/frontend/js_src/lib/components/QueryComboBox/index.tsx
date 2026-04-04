@@ -11,6 +11,7 @@ import { f } from '../../utils/functools';
 import { getValidationAttributes } from '../../utils/parser/definitions';
 import type { RA } from '../../utils/types';
 import { filterArray, localized } from '../../utils/types';
+import { Button } from '../Atoms/Button';
 import { DataEntry } from '../Atoms/DataEntry';
 import { LoadingContext, ReadOnlyContext } from '../Core/Contexts';
 import { backboneFieldSeparator, toTable } from '../DataModel/helpers';
@@ -221,6 +222,7 @@ export function QueryComboBox({
       >
     | State<'AccessDeniedState', { readonly collectionName: string }>
     | State<'MainState'>
+    | State<'SharedRecordWarningState'>
     | State<'ViewResourceState', { readonly isReadOnly: boolean }>
   >({ type: 'MainState' });
 
@@ -232,7 +234,9 @@ export function QueryComboBox({
 
   const loading = React.useContext(LoadingContext);
   const handleOpenRelated = (isReadOnly: boolean): void =>
-    state.type === 'ViewResourceState' || state.type === 'AccessDeniedState'
+    state.type === 'ViewResourceState' ||
+    state.type === 'AccessDeniedState' ||
+    state.type === 'SharedRecordWarningState'
       ? setState({ type: 'MainState' })
       : typeof relatedCollectionId === 'number' &&
           !userInformation.availableCollections.some(
@@ -247,7 +251,16 @@ export function QueryComboBox({
                 })
             )
           )
-        : setState({ type: 'ViewResourceState', isReadOnly });
+        : /*
+           * For non-dependent, non-read-only edits, warn the user that
+           * the related record may be shared by other records (#597).
+           * Carry Forward copies foreign keys, so editing a shared
+           * Locality (for example) silently mutates every CO that
+           * references it.
+           */
+          !isReadOnly && !field.isDependent()
+          ? setState({ type: 'SharedRecordWarningState' })
+          : setState({ type: 'ViewResourceState', isReadOnly });
 
   const subViewRelationship = React.useContext(SubViewContext)?.relationship;
   const pendingValueRef = React.useRef('');
@@ -615,6 +628,45 @@ export function QueryComboBox({
           >
             {userText.collectionAccessDeniedDescription({
               collectionName: state.collectionName,
+            })}
+          </Dialog>
+        )}
+        {state.type === 'SharedRecordWarningState' && (
+          <Dialog
+            buttons={
+              <>
+                <Button.DialogClose>
+                  {commonText.cancel()}
+                </Button.DialogClose>
+                <Button.Info
+                  onClick={(): void =>
+                    setState({ type: 'ViewResourceState', isReadOnly: false })
+                  }
+                >
+                  {formsText.editShared()}
+                </Button.Info>
+                <Button.Fancy
+                  onClick={(): void =>
+                    loading(
+                      formatted!.resource!.clone(true).then((clonedResource) => {
+                        resource?.set(field.name, clonedResource as never);
+                        setState({
+                          type: 'AddResourceState',
+                          resource: clonedResource,
+                        });
+                      })
+                    )
+                  }
+                >
+                  {formsText.cloneAndEdit()}
+                </Button.Fancy>
+              </>
+            }
+            header={formsText.sharedRecordWarning()}
+            onClose={(): void => setState({ type: 'MainState' })}
+          >
+            {formsText.sharedRecordWarningDescription({
+              tableName: field.relatedTable.label,
             })}
           </Dialog>
         )}
