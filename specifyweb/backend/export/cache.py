@@ -56,7 +56,7 @@ def build_cache_tables(export_dataset):
     _build_single_cache(core_mapping, collection)
 
     # Build extension cache tables
-    for ext in export_dataset.extensions.all().order_by('sortorder'):
+    for ext in export_dataset.extensions.all().order_by('sortorder').iterator(chunk_size=2000):
         _build_single_cache(ext.schemamapping, collection,
                             prefix=f'dwc_cache_ext{ext.sortorder}')
 
@@ -76,7 +76,7 @@ def _build_single_cache(mapping, collection, prefix='dwc_cache'):
 
     try:
         # Get the query fields with terms
-        fields = mapping.query.fields.all().order_by('position')
+        fields = mapping.query.fields.all().order_by('position').iterator(chunk_size=2000)
 
         # Build column definitions: each field becomes a TEXT column
         # named by its term IRI (sanitized) or field name
