@@ -40,6 +40,20 @@ export const formsText = createDictionary({
     'pt-br': 'Criar uma cópia completa do registro atual',
     'hr-hr': 'Izradi potpunu kopiju trenutnog zapisa',
   },
+  sharedRecordWarning: {
+    'en-us': 'Shared Record',
+  },
+  sharedRecordWarningDescription: {
+    'en-us': `This {tableName:string} record may be referenced by other records.
+Editing it will change the data for all records that share it.
+To make changes only for this record, clone it first.`,
+  },
+  editShared: {
+    'en-us': 'Edit Shared',
+  },
+  cloneAndEdit: {
+    'en-us': 'Clone and Edit',
+  },
   valueMustBeUniqueToField: {
     'en-us': 'Value must be unique to {fieldName:string}',
     'ru-ru': 'Значение должно быть уникальным для {fieldName:string}',
