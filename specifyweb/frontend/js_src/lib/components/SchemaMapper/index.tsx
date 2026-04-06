@@ -21,6 +21,7 @@ type ApiMappingRecord = {
   readonly mappingType: string;
   readonly isDefault: boolean;
   readonly queryId: number;
+  readonly vocabulary: string;
   readonly totalFields: number;
   readonly unmappedFields: number;
 };
@@ -32,6 +33,7 @@ function toMappingRecord(raw: ApiMappingRecord): MappingRecord {
     mappingType: raw.mappingType === "Core" ? 'Core' : 'Extension',
     isDefault: raw.isDefault,
     queryId: raw.queryId,
+    vocabulary: raw.vocabulary ?? 'dwc',
     totalFields: raw.totalFields ?? 0,
     unmappedFields: raw.unmappedFields ?? 0,
   };

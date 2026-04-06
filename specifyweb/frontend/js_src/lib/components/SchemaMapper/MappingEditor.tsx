@@ -23,6 +23,7 @@ type ApiMappingDetail = {
   readonly mappingType: string;
   readonly isDefault: boolean;
   readonly queryId: number;
+  readonly vocabulary: string;
   readonly totalFields: number;
   readonly unmappedFields: number;
 };
@@ -120,6 +121,7 @@ export function MappingEditor({
         mappingType: raw.mappingType === 'Core' ? 'Core' : 'Extension',
         isDefault: raw.isDefault,
         queryId: raw.queryId,
+        vocabulary: raw.vocabulary ?? 'dwc',
         totalFields: raw.totalFields ?? 0,
         unmappedFields: raw.unmappedFields ?? 0,
       };
@@ -165,12 +167,12 @@ export function MappingEditor({
     };
   }, [mappingId]);
 
-  // TODO: store vocabulary key on SchemaMapping and filter by it
-  // For now, restrict terms to the first vocabulary (Darwin Core) as default
+  // Filter terms to the mapping's vocabulary (stored on SchemaMapping)
   const allTerms: Readonly<Record<string, DwcTerm>> = React.useMemo(() => {
-    if (schemaTerms === undefined) return {};
-    const vocabs = Object.values(schemaTerms.vocabularies);
-    const vocab = vocabs.length > 0 ? vocabs[0] : undefined;
+    if (schemaTerms === undefined || mapping === undefined) return {};
+    const vocabKey = mapping.vocabulary ?? 'dwc';
+    const vocab = schemaTerms.vocabularies[vocabKey]
+      ?? Object.values(schemaTerms.vocabularies)[0];
     if (vocab === undefined) return {};
     const result: Record<string, DwcTerm> = {};
     for (const [iri, term] of Object.entries(vocab.terms)) {

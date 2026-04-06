@@ -12,6 +12,7 @@ export type MappingRecord = {
   readonly mappingType: 'Core' | 'Extension';
   readonly isDefault: boolean;
   readonly queryId: number;
+  readonly vocabulary: string;
   readonly totalFields: number;
   readonly unmappedFields: number;
 };
