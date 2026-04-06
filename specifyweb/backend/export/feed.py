@@ -31,11 +31,7 @@ def update_feed(force=False, notify_user: Specifyuser | None = None):
     if feed_resource is None:
         raise MissingFeedResource()
 
-    try:
-        os.makedirs(FEED_DIR)
-    except OSError as e:
-        if e.errno != errno.EEXIST:
-            raise
+    os.makedirs(FEED_DIR, exist_ok=True)
 
     def_tree = ET.fromstring(feed_resource)
     for item_node in def_tree.findall('item'):
@@ -81,6 +77,7 @@ def needs_update(path, days):
     except OSError as e:
         if e.errno != errno.ENOENT:
             raise
+        return True
     else:
         update_interval = 24*60*60 * days
         age = time.time() - mtime
@@ -103,8 +100,7 @@ def update_feed_v2():
     cache and regenerate DwCA.
     """
     from .models import ExportDataSet
-    from .cache import build_cache_tables
-    from .dwca_from_cache import make_dwca_from_dataset
+    from .dwca_from_mapping import make_dwca_from_dataset
     from django.utils import timezone
     from datetime import timedelta
 
@@ -118,7 +114,6 @@ def update_feed_v2():
                 continue
 
         try:
-            build_cache_tables(dataset)
             make_dwca_from_dataset(dataset)
             updated.append(dataset.exportname)
         except Exception:

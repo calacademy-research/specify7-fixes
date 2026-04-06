@@ -1,5 +1,5 @@
 from django.db import models
-from django.db.models.signals import post_delete
+from django.db.models.signals import pre_delete
 from django.dispatch import receiver
 from django.utils import timezone
 
@@ -15,6 +15,10 @@ class SchemaMapping(models.Model):
     )
     name = models.CharField(max_length=256, db_column='Name')
     isdefault = models.BooleanField(default=False, db_column='IsDefault')
+    vocabulary = models.CharField(
+        max_length=32, db_column='Vocabulary', null=True, blank=True,
+        help_text='Vocabulary key (e.g. dwc, ac) — locked after creation',
+    )
     timestampcreated = models.DateTimeField(db_column='TimestampCreated', default=timezone.now)
     timestampmodified = models.DateTimeField(db_column='TimestampModified', default=timezone.now)
     version = models.IntegerField(default=0, db_column='Version')
@@ -22,7 +26,7 @@ class SchemaMapping(models.Model):
     # Relationships
     query = models.OneToOneField(
         'specify.Spquery', db_column='SpQueryID',
-        on_delete=models.CASCADE, related_name='schemamapping',
+        on_delete=models.CASCADE, related_name='+',
     )
     createdbyagent = models.ForeignKey(
         'specify.Agent', db_column='CreatedByAgentID',
@@ -99,9 +103,9 @@ class CacheTableMeta(models.Model):
         db_table = 'cachetablemeta'
 
 
-@receiver(post_delete, sender=SchemaMapping)
+@receiver(pre_delete, sender=SchemaMapping)
 def delete_schema_mapping_cache(sender, instance, **kwargs):
-    """Drop cache table when a SchemaMapping is deleted."""
+    """Drop cache table before a SchemaMapping is deleted (before CASCADE removes CacheTableMeta)."""
     from .cache import drop_cache_table
     for meta in CacheTableMeta.objects.filter(schemamapping=instance):
         try:

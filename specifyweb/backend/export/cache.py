@@ -3,6 +3,8 @@ import logging
 import re
 from django.db import connection
 
+from .dwca_utils import sanitize_column_name
+
 logger = logging.getLogger(__name__)
 
 
@@ -14,7 +16,8 @@ def get_cache_table_name(mapping_id, collection_id, prefix='dwc_cache'):
 def create_cache_table(table_name, columns):
     """Create a cache table with the given columns.
 
-    columns: list of (column_name, column_type) tuples
+    columns: list of (column_name, column_type) tuples.
+    An auto-increment primary key is always added.
     """
     safe_name = re.sub(r'[^a-zA-Z0-9_]', '', table_name)
     col_defs = ', '.join(
@@ -23,7 +26,11 @@ def create_cache_table(table_name, columns):
     )
     with connection.cursor() as cursor:
         cursor.execute(f'DROP TABLE IF EXISTS `{safe_name}`')
-        cursor.execute(f'CREATE TABLE `{safe_name}` ({col_defs})')
+        cursor.execute(
+            f'CREATE TABLE `{safe_name}` ('
+            f'`id` INT AUTO_INCREMENT PRIMARY KEY, {col_defs}'
+            f') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+        )
     logger.info('Created cache table %s', safe_name)
 
 
@@ -35,123 +42,168 @@ def drop_cache_table(table_name):
     logger.info('Dropped cache table %s', safe_name)
 
 
-def insert_into_cache(table_name, select_sql, params=None):
-    """Populate a cache table from a SELECT query."""
-    safe_name = re.sub(r'[^a-zA-Z0-9_]', '', table_name)
-    with connection.cursor() as cursor:
-        cursor.execute(f'INSERT INTO `{safe_name}` {select_sql}', params or [])
-        return cursor.rowcount
-
-
-def build_cache_tables(export_dataset):
-    """Build cache tables for an ExportDataSet's core mapping and all extensions.
-
-    Each cache table is a flat denormalized table with one column per mapped query field.
-    The core table and all extension tables include an occurrenceID column for joining.
-    """
+def build_cache_tables(export_dataset, user=None, progress_callback=None):
+    """Build cache tables for an ExportDataSet's core mapping and all extensions."""
     core_mapping = export_dataset.coremapping
     collection = export_dataset.collection
 
-    # Build core cache table
-    _build_single_cache(core_mapping, collection)
+    _build_single_cache(core_mapping, collection, user=user,
+                        progress_callback=progress_callback)
 
-    # Build extension cache tables
     for ext in export_dataset.extensions.all().order_by('sortorder').iterator(chunk_size=2000):
         _build_single_cache(ext.schemamapping, collection,
-                            prefix=f'dwc_cache_ext{ext.sortorder}')
+                            prefix=f'dwc_cache_ext{ext.sortorder}',
+                            user=user, progress_callback=progress_callback)
 
 
-def _build_single_cache(mapping, collection, prefix='dwc_cache'):
+def _build_single_cache(mapping, collection, prefix='dwc_cache', user=None,
+                        progress_callback=None):
     """Build a single cache table for one SchemaMapping."""
-    from specifyweb.backend.export.models import CacheTableMeta
+    from .models import CacheTableMeta
     from django.utils import timezone
 
     table_name = get_cache_table_name(mapping.id, collection.id, prefix)
 
-    # Update build status
     meta, _ = CacheTableMeta.objects.update_or_create(
         schemamapping=mapping,
         defaults={'tablename': table_name, 'buildstatus': 'building'}
     )
 
     try:
-        # Get the query fields with terms
-        fields = mapping.query.fields.all().order_by('position').iterator(chunk_size=2000)
+        display_fields = [
+            f for f in mapping.query.fields.order_by('position')
+            if getattr(f, 'term', None)
+        ]
 
-        # Build column definitions: each field becomes a TEXT column
-        # named by its term IRI (sanitized) or field name
-        columns = [('occurrence_id', 'VARCHAR(256)')]  # always include occurrenceID
-        for field in fields:
-            col_name = _sanitize_column_name(field.term or field.fieldname)
-            columns.append((col_name, 'TEXT'))
+        columns = [
+            (sanitize_column_name(f.term), _infer_column_type(f))
+            for f in display_fields
+        ]
 
-        # Create the cache table
         create_cache_table(table_name, columns)
 
-        # TODO: Execute the query and populate the table
-        # This requires integration with stored_queries.execution which
-        # needs a SQLAlchemy session. For now, create the empty table.
+        rowcount = _execute_and_populate(
+            table_name, mapping, collection, user, progress_callback
+        )
 
         meta.buildstatus = 'idle'
         meta.lastbuilt = timezone.now()
-        meta.rowcount = 0
+        meta.rowcount = rowcount
         meta.save()
 
-    except Exception as e:
+        logger.info('Cache table %s built with %d rows', table_name, rowcount)
+
+    except Exception:
         meta.buildstatus = 'error'
         meta.save()
+        logger.exception('Failed to build cache table %s', table_name)
         raise
 
 
-def _sanitize_column_name(name):
-    """Sanitize a string into a valid MySQL column name."""
-    # Take the last segment of a URI (the term name)
-    if '/' in name:
-        name = name.rsplit('/', 1)[-1]
-    if '#' in name:
-        name = name.rsplit('#', 1)[-1]
-    # Remove non-alphanumeric chars except underscore
-    name = re.sub(r'[^a-zA-Z0-9_]', '_', name)
-    return name[:64]  # MySQL column name limit
+def _execute_and_populate(table_name, mapping, collection, user, progress_callback=None):
+    """Execute a mapping's query and INSERT results into the cache table.
 
+    Uses SQLAlchemy build_query() to ensure output matches query_to_csv
+    (date formatting, null replacement, etc.), then batch-INSERTs rows.
 
-def cleanup_orphan_caches():
-    """Drop cache tables that have no corresponding SchemaMapping."""
-    from specifyweb.backend.export.models import CacheTableMeta, SchemaMapping
-
-    # Find CacheTableMeta records where the schemamapping no longer exists
-    orphans = CacheTableMeta.objects.filter(schemamapping__isnull=True)
-    for orphan in orphans:
-        drop_cache_table(orphan.tablename)
-        orphan.delete()
-
-    # Also check for cache tables in the DB that aren't tracked
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_name LIKE 'dwc\\_cache\\_%' AND table_schema = DATABASE()"
-        )
-        db_tables = {row[0] for row in cursor.fetchall()}
-
-    tracked_tables = set(CacheTableMeta.objects.values_list('tablename', flat=True))
-    for orphan_table in db_tables - tracked_tables:
-        drop_cache_table(orphan_table)
-
-
-def validate_occurrence_id_uniqueness(mapping, collection):
-    """Check that occurrenceID values are unique in the core cache table.
-
-    Returns list of duplicate occurrenceIDs, or empty list if all unique.
+    Returns the number of rows inserted.
     """
-    table_name = get_cache_table_name(mapping.id, collection.id)
-    safe_name = re.sub(r'[^a-zA-Z0-9_]', '', table_name)
+    from specifyweb.backend.stored_queries.execution import (
+        build_query, BuildQueryProps, set_group_concat_max_len,
+        apply_special_post_query_processing,
+    )
+    from specifyweb.backend.stored_queries.queryfield import QueryField
+    from specifyweb.backend.stored_queries.models import session_context
+    from .field_adapter import EphemeralFieldAdapter
 
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f'SELECT occurrence_id, COUNT(*) as cnt FROM `{safe_name}` '
-                f'GROUP BY occurrence_id HAVING cnt > 1 LIMIT 100'
-            )
-            return [row[0] for row in cursor.fetchall()]
-    except Exception:
-        return []
+    query_obj = mapping.query
+    display_fields = [
+        f for f in query_obj.fields.order_by('position')
+        if getattr(f, 'term', None)
+    ]
+    field_specs = [
+        QueryField.from_spqueryfield(EphemeralFieldAdapter(f, force_display=True))
+        for f in display_fields
+    ]
+
+    safe_name = re.sub(r'[^a-zA-Z0-9_]', '', table_name)
+    col_count = len(display_fields)
+    placeholders = ', '.join(['%s'] * col_count)
+    col_names = ', '.join(
+        f'`{sanitize_column_name(f.term)}`'
+        for f in display_fields
+    )
+    insert_sql = f'INSERT INTO `{safe_name}` ({col_names}) VALUES ({placeholders})'
+
+    total = 0
+    BATCH_SIZE = 2000
+
+    with session_context() as session:
+        set_group_concat_max_len(session.connection())
+        sa_query, _ = build_query(
+            session, collection, user,
+            query_obj.contexttableid,
+            field_specs,
+            BuildQueryProps(
+                replace_nulls=True,
+                date_format_override='%Y-%m-%d',
+            ),
+        )
+        sa_query = apply_special_post_query_processing(
+            sa_query, query_obj.contexttableid, field_specs, collection, user,
+            should_list_query=False,
+        )
+
+        batch = []
+        if isinstance(sa_query, list):
+            iterator = iter(sa_query)
+        else:
+            iterator = sa_query.yield_per(BATCH_SIZE)
+
+        for row in iterator:
+            batch.append(tuple(
+                str(v) if v is not None else '' for v in row[1:]
+            ))
+
+            if len(batch) >= BATCH_SIZE:
+                with connection.cursor() as cursor:
+                    cursor.executemany(insert_sql, batch)
+                total += len(batch)
+                batch = []
+                if progress_callback:
+                    progress_callback(total, None)
+
+        if batch:
+            with connection.cursor() as cursor:
+                cursor.executemany(insert_sql, batch)
+            total += len(batch)
+
+    if progress_callback:
+        progress_callback(total, total)
+
+    return total
+
+
+def _infer_column_type(spqueryfield):
+    """Infer a MySQL column type from a Specify query field."""
+    fname = (spqueryfield.fieldname or '').lower()
+
+    if 'guid' in fname or 'uuid' in fname:
+        return 'VARCHAR(256)'
+    if fname in ('id', 'rankid', 'number1', 'number2', 'countamt',
+                 'sortorder', 'position', 'version'):
+        return 'INT'
+    if 'numericyear' in fname or 'numericmonth' in fname or 'numericday' in fname:
+        return 'INT'
+    if fname in ('latitude1', 'latitude2', 'longitude1', 'longitude2',
+                 'latlongaccuracy', 'maxelevation', 'minelevation'):
+        return 'DECIMAL(12,6)'
+    if fname in ('startdate', 'enddate', 'determineddate', 'catalogeddate',
+                 'timestampcreated', 'timestampmodified'):
+        return 'VARCHAR(32)'
+    if fname.startswith('is') or fname.startswith('yes'):
+        return 'VARCHAR(8)'
+    if fname in ('catalognumber', 'altcatalognumber', 'barcode', 'fieldnumber',
+                 'code', 'abbreviation', 'datum'):
+        return 'VARCHAR(256)'
+    return 'TEXT'
