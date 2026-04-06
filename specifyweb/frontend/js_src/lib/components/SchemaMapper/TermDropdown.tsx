@@ -5,29 +5,35 @@ import { headerText } from '../../localization/header';
 import { Button } from '../Atoms/Button';
 import { Input } from '../Atoms/Form';
 import type { DwcTerm } from './types';
+import { TermTooltip } from './TermTooltip';
 
 export function TermDropdown({
   selectedIri,
   vocabularyTerms,
+  usedTerms = [],
   onChange: handleChange,
 }: {
   readonly selectedIri: string | undefined;
   readonly vocabularyTerms: Readonly<Record<string, DwcTerm>>;
+  readonly usedTerms?: ReadonlyArray<string>;
   readonly onChange: (iri: string | undefined) => void;
 }): JSX.Element {
   const [search, setSearch] = React.useState('');
   const [isOpen, setIsOpen] = React.useState(false);
   const [showCustomIri, setShowCustomIri] = React.useState(false);
   const [customIri, setCustomIri] = React.useState('');
+  const [showTooltip, setShowTooltip] = React.useState(false);
 
   const filteredTerms = React.useMemo(() => {
     const lowerSearch = search.toLowerCase();
     return Object.entries(vocabularyTerms).filter(
       ([iri, term]) =>
-        term.label.toLowerCase().includes(lowerSearch) ||
-        iri.toLowerCase().includes(lowerSearch)
+        // Hide terms already used by other fields
+        !usedTerms.includes(iri) &&
+        (term.label.toLowerCase().includes(lowerSearch) ||
+          iri.toLowerCase().includes(lowerSearch))
     );
-  }, [vocabularyTerms, search]);
+  }, [vocabularyTerms, search, usedTerms]);
 
   const selectedTerm =
     selectedIri === undefined ? undefined : vocabularyTerms[selectedIri];
@@ -47,6 +53,16 @@ export function TermDropdown({
             setIsOpen(true);
           }}
         />
+        {selectedIri !== undefined && selectedTerm !== undefined && (
+          <button
+            className="flex-shrink-0 text-blue-500 hover:text-blue-700"
+            title="Term info"
+            type="button"
+            onClick={() => setShowTooltip(!showTooltip)}
+          >
+            {'ℹ'}
+          </button>
+        )}
         {selectedIri !== undefined && (
           <Button.Icon
             icon="x"
@@ -54,10 +70,18 @@ export function TermDropdown({
             onClick={() => {
               handleChange(undefined);
               setSearch('');
+              setShowTooltip(false);
             }}
           />
         )}
       </div>
+      {showTooltip && selectedIri !== undefined && selectedTerm !== undefined && (
+        <TermTooltip
+          iri={selectedIri}
+          term={selectedTerm}
+          onClose={() => setShowTooltip(false)}
+        />
+      )}
       {isOpen && (
         <ul
           className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded

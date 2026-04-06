@@ -119,18 +119,6 @@ const rawUserTools = ensure<IR<IR<Omit<MenuItem, 'name'>>>>()({
     },
   },
   [commonText.export()]: {
-    makeDwca: {
-      title: headerText.makeDwca(),
-      enabled: () => hasPermission('/export/dwca', 'execute'),
-      url: '/specify/overlay/make-dwca/',
-      icon: icons.upload,
-    },
-    updateExportFeed: {
-      title: headerText.updateExportFeed(),
-      enabled: () => hasPermission('/export/feed', 'force_update'),
-      url: '/specify/overlay/force-update-feed/',
-      icon: icons.rss,
-    },
     schemaMapper: {
       title: headerText.schemaMapper(),
       enabled: () => hasPermission('/export/schema_mapping', 'read'),

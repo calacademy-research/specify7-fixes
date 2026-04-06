@@ -29,7 +29,7 @@ export function ClonePackage({
         // Clone the core mapping first (the backend will also clone
         // extensions in a future iteration).
         const response = await ajax<{ readonly id: number }>(
-          `/export/clone_mapping/${sourceId}/`,
+          `/export/clone_dataset/${sourceId}/`,
           {
             method: 'POST',
             headers: { Accept: 'application/json' },

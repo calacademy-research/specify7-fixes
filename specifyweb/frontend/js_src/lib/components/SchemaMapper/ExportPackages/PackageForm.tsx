@@ -17,15 +17,12 @@
 import React from 'react';
 
 import { ajax } from '../../../utils/ajax';
+import { csrfToken } from '../../../utils/ajax/csrfToken';
+import { schema } from '../../DataModel/schema';
+import { userInformation } from '../../InitialContext/userInformation';
 import { Button } from '../../Atoms/Button';
 import { Input, Label } from '../../Atoms/Form';
-
-type MappingSummary = {
-  readonly id: number;
-  readonly name: string;
-  readonly description: string;
-  readonly mappingtype: string;
-};
+import type { MappingSummary } from '../types';
 
 type PackageFormData = {
   exportname: string;
@@ -59,23 +56,69 @@ export function PackageForm({
     readonly MappingSummary[] | undefined
   >(undefined);
   const [saving, setSaving] = React.useState(false);
+  const [exportSuccess, setExportSuccess] = React.useState(false);
+  const [downloading, setDownloading] = React.useState(false);
+
+  // EML import state
+  const [emlFile, setEmlFile] = React.useState<{
+    readonly name: string;
+    readonly content: string;
+  } | undefined>(undefined);
+  const [emlError, setEmlError] = React.useState<string | undefined>(undefined);
+  const emlInputRef = React.useRef<HTMLInputElement>(null);
 
   // Fetch available schema mappings
   React.useEffect(() => {
-    ajax<readonly MappingSummary[]>('/export/mappings/', {
+    ajax<readonly MappingSummary[]>('/export/list_mappings/', {
       headers: { Accept: 'application/json' },
     })
       .then((response) => setMappings(response.data))
       .catch(console.error);
   }, []);
 
+  // Load existing dataset when editing (datasetId is provided)
+  React.useEffect(() => {
+    if (datasetId === undefined) return;
+    let cancelled = false;
+    ajax<{
+      readonly exportname: string;
+      readonly filename: string;
+      readonly coremapping_id: number | null;
+      readonly metadata: number | null;
+      readonly includeinfeed: boolean;
+      readonly frequency: number;
+      readonly extensions: readonly number[];
+    }>(`/export/get_dataset/${datasetId}/`, {
+      headers: { Accept: 'application/json' },
+    })
+      .then((response) => {
+        if (cancelled) return;
+        const data = response.data;
+        // Clear "Copy of" names so the user must enter unique names (clone flow)
+        const hasCopyPrefix = data.exportname.startsWith('Copy of');
+        setForm({
+          exportname: hasCopyPrefix ? '' : data.exportname,
+          filename: hasCopyPrefix ? '' : data.filename,
+          coremapping: data.coremapping_id,
+          metadata: data.metadata,
+          includeinfeed: data.includeinfeed,
+          frequency: data.frequency,
+          extensions: data.extensions,
+        });
+      })
+      .catch(console.error);
+    return () => {
+      cancelled = true;
+    };
+  }, [datasetId]);
+
   const coreMappings = React.useMemo(
-    () => mappings?.filter((m) => m.mappingtype === 'core') ?? [],
+    () => mappings?.filter((m) => m.mappingType === 'Core') ?? [],
     [mappings]
   );
 
   const extensionMappings = React.useMemo(
-    () => mappings?.filter((m) => m.mappingtype === 'extension') ?? [],
+    () => mappings?.filter((m) => m.mappingType === 'Extension') ?? [],
     [mappings]
   );
 
@@ -92,17 +135,37 @@ export function PackageForm({
     if (!canSave) return;
     setSaving(true);
     try {
-      // For now, POST to a save endpoint (to be wired up to Django REST or
-      // the resource API in a follow-up).  This is a placeholder that logs
-      // the intended payload.
-      console.info('Save export package:', { datasetId, ...form });
+      const payload = {
+        exportname: form.exportname,
+        filename: form.filename,
+        coremapping_id: form.coremapping,
+        metadata: form.metadata,
+        includeinfeed: form.includeinfeed,
+        frequency: form.frequency,
+        extensions: [...form.extensions],
+        ...(emlFile !== undefined ? { eml_xml: emlFile.content } : {}),
+      };
+
+      if (isNew) {
+        await ajax('/export/create_dataset/', {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+          body: payload,
+        });
+      } else {
+        await ajax(`/export/update_dataset/${datasetId}/`, {
+          method: 'PUT',
+          headers: { Accept: 'application/json' },
+          body: payload,
+        });
+      }
       onClose();
-    } catch (error) {
-      console.error('Failed to save export package:', error);
+    } catch (caughtError) {
+      console.error('Failed to save export package:', caughtError);
     } finally {
       setSaving(false);
     }
-  }, [canSave, datasetId, form, onClose]);
+  }, [canSave, isNew, datasetId, form, onClose]);
 
   const addExtension = React.useCallback(
     (mappingId: number) => {
@@ -183,6 +246,19 @@ export function PackageForm({
         </select>
       </Label.Block>
 
+      {/* Collection (read-only) */}
+      <Label.Block>
+        Collection
+        <Input.Text
+          value={
+            userInformation.availableCollections.find(
+              ({ id }) => id === schema.domainLevelIds.collection
+            )?.collectionName ?? ''
+          }
+          readOnly
+        />
+      </Label.Block>
+
       {/* Extensions */}
       <fieldset className="rounded border p-3">
         <legend className="font-medium">Extensions</legend>
@@ -228,6 +304,70 @@ export function PackageForm({
         )}
       </fieldset>
 
+      {/* Metadata (EML) */}
+      <fieldset className="rounded border p-3">
+        <legend className="font-medium">Metadata (EML)</legend>
+        <div className="flex flex-col gap-2">
+          <a
+            className="text-sm text-blue-600 underline hover:text-blue-800"
+            href="https://gbif-norway.github.io/eml-generator-js"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Generate EML on GBIF
+          </a>
+          <div className="flex items-center gap-2">
+            <Button.Small
+              onClick={() => emlInputRef.current?.click()}
+            >
+              Import EML
+            </Button.Small>
+            <input
+              accept=".xml"
+              className="hidden"
+              ref={emlInputRef}
+              type="file"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file !== undefined) {
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const content = reader.result as string;
+                    const doc = new DOMParser().parseFromString(
+                      content,
+                      'text/xml'
+                    );
+                    if (doc.querySelector('parsererror') !== null) {
+                      setEmlError(
+                        'Invalid XML: the imported file is not well-formed.'
+                      );
+                      setEmlFile(undefined);
+                      return;
+                    }
+                    setEmlError(undefined);
+                    setEmlFile({
+                      name: file.name,
+                      content,
+                    });
+                  };
+                  reader.readAsText(file);
+                }
+              }}
+            />
+            {emlFile !== undefined && (
+              <span className="text-sm text-green-700 dark:text-green-400">
+                {`EML loaded: ${emlFile.name}`}
+              </span>
+            )}
+            {emlError !== undefined && (
+              <span className="text-sm text-red-600">
+                {emlError}
+              </span>
+            )}
+          </div>
+        </div>
+      </fieldset>
+
       {/* Include in RSS feed */}
       <Label.Inline>
         <Input.Checkbox
@@ -243,7 +383,7 @@ export function PackageForm({
       {form.includeinfeed && (
         <Label.Block>
           Update Frequency (hours)
-          <Input.Number
+          <Input.Integer
             min={1}
             required
             value={form.frequency}
@@ -267,17 +407,60 @@ export function PackageForm({
         <Button.Secondary onClick={onClose}>Cancel</Button.Secondary>
         {!isNew && (
           <Button.Success
+            disabled={downloading}
             onClick={() => {
-              ajax(`/export/generate_dwca/${datasetId}/`, {
+              setDownloading(true);
+              fetch(`/export/generate_dwca/${datasetId}/`, {
                 method: 'POST',
-                headers: { Accept: 'application/json' },
-              }).catch(console.error);
+                credentials: 'same-origin',
+                headers: {
+                  'X-CSRFToken': csrfToken ?? '',
+                },
+              })
+                .then(async (response) => {
+                  if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(
+                      (err as { error?: string }).error ??
+                        'Export failed'
+                    );
+                  }
+                  const blob = await response.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download =
+                    response.headers
+                      .get('Content-Disposition')
+                      ?.match(/filename="(.+)"/)?.[1] ?? 'export.zip';
+                  a.click();
+                  URL.revokeObjectURL(url);
+                  setExportSuccess(true);
+                })
+                .catch(console.error)
+                .finally(() => setDownloading(false));
             }}
           >
-            Download Archive
+            {downloading ? 'Generating...' : 'Download Archive'}
           </Button.Success>
         )}
       </div>
+      {downloading && (
+        <p className="text-sm text-gray-500">Building archive...</p>
+      )}
+      {exportSuccess && (
+        <p className="text-sm text-green-700 dark:text-green-400">
+          {'Export successful! Validate your archive with the '}
+          <a
+            className="text-blue-600 underline hover:text-blue-800 dark:text-blue-400"
+            href="https://www.gbif.org/tools/data-validator"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            GBIF Data Validator
+          </a>
+        </p>
+      )}
     </div>
   );
 }

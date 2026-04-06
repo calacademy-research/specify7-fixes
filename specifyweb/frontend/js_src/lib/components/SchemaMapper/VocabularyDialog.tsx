@@ -14,6 +14,7 @@ const vocabularies: ReadonlyArray<DwcVocabulary> = [
     abbreviation: 'dwc',
     description:
       'Core terms for sharing biodiversity occurrence data and related information.',
+    uri: 'http://rs.tdwg.org/dwc/terms/',
     terms: {},
   },
   {
@@ -22,6 +23,7 @@ const vocabularies: ReadonlyArray<DwcVocabulary> = [
     abbreviation: 'dc',
     description:
       'General-purpose metadata terms for describing resources.',
+    uri: 'http://purl.org/dc/terms/',
     terms: {},
   },
   {
@@ -30,6 +32,7 @@ const vocabularies: ReadonlyArray<DwcVocabulary> = [
     abbreviation: 'ac',
     description:
       'Terms for describing biodiversity-related multimedia resources.',
+    uri: 'http://rs.tdwg.org/ac/terms/',
     terms: {},
   },
 ];
@@ -68,6 +71,9 @@ export function VocabularyDialog({
               </div>
               <p className="mt-1 text-sm text-gray-600 dark:text-neutral-400">
                 {vocabulary.description}
+              </p>
+              <p className="mt-0.5 text-xs text-gray-400 dark:text-neutral-500">
+                {vocabulary.uri}
               </p>
             </button>
           </li>

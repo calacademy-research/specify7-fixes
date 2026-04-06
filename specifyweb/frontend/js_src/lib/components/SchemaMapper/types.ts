@@ -1,9 +1,19 @@
+export const OCCURRENCE_ID_IRI = 'http://rs.tdwg.org/dwc/terms/occurrenceID';
+
+export type MappingSummary = {
+  readonly id: number;
+  readonly name: string;
+  readonly mappingType: string;
+};
+
 export type MappingRecord = {
   readonly id: number;
   readonly name: string;
   readonly mappingType: 'Core' | 'Extension';
   readonly isDefault: boolean;
   readonly queryId: number;
+  readonly totalFields: number;
+  readonly unmappedFields: number;
 };
 
 export type MappingField = {
@@ -29,5 +39,6 @@ export type DwcVocabulary = {
   readonly name: string;
   readonly abbreviation: string;
   readonly description: string;
+  readonly uri: string;
   readonly terms: Readonly<Record<string, DwcTerm>>;
 };

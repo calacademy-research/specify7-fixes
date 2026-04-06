@@ -21,12 +21,10 @@ export function findDuplicateTerms(
 }
 
 export function MappingToolbar({
-  onRunPreview: handleRunPreview,
   onSave: handleSave,
   isRunning,
   fields,
 }: {
-  readonly onRunPreview: () => void;
   readonly onSave: () => void;
   readonly isRunning: boolean;
   readonly fields: ReadonlyArray<MappingField>;
@@ -49,12 +47,6 @@ export function MappingToolbar({
 
   return (
     <div className="flex items-center gap-3">
-      <Button.Info
-        disabled={isRunning}
-        onClick={isRunning ? undefined : handleRunPreview}
-      >
-        {headerText.runAndPreview()}
-      </Button.Info>
       <Button.Save
         disabled={isRunning}
         onClick={isRunning ? undefined : handleSaveClick}
