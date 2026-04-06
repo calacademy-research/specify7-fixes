@@ -55,6 +55,13 @@ export const formsText = createDictionary({
   rememberChoiceForSession: {
     'en-us': 'Use this choice for the rest of this session',
   },
+  linksForInspectionOnly: {
+    'en-us':
+      'Links open in a new tab for inspection only \u2014 no changes will be made.',
+  },
+  andNMore: {
+    'en-us': '\u2026 and {count:string} more',
+  },
   valueMustBeUniqueToField: {
     'en-us': 'Value must be unique to {fieldName:string}',
     'ru-ru': 'Значение должно быть уникальным для {fieldName:string}',

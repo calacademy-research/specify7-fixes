@@ -24,6 +24,8 @@ describe('Shared record edit warning', () => {
     expect(
       typeof formsText.sharedRecordWarningDescription({
         tableName: 'Locality',
+        count: '3',
+        parentTableName: 'Collecting Event',
       })
     ).toBe('string');
 

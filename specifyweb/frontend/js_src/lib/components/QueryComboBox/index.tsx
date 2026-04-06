@@ -246,9 +246,11 @@ export function QueryComboBox({
         {
           readonly sharingCount: number;
           readonly sharingRecords: RA<{
-            readonly coId: number | undefined;
-            readonly coLabel: string | undefined;
-            readonly ceId: number | undefined;
+            readonly parentId: number | undefined;
+            readonly parentLabel: string | undefined;
+            readonly parentTableName: string | undefined;
+            readonly sharedId: number | undefined;
+            readonly sharedTableName: string;
           }>;
         }
       >
@@ -262,6 +264,8 @@ export function QueryComboBox({
   const targetCollectionId = forceCollection ?? relatedCollectionId;
 
   const loading = React.useContext(LoadingContext);
+  const subViewRelationship = React.useContext(SubViewContext)?.relationship;
+
   const handleOpenRelated = (isReadOnly: boolean): void => {
     if (
       state.type === 'ViewResourceState' ||
@@ -337,38 +341,43 @@ export function QueryComboBox({
             }>(
               `/api/specify/${queryTable}/?${queryFilter}=${relatedId}&limit=11`,
               { headers: { Accept: 'application/json' } }
-            ).then(({ data }) => ({
-              totalCount: data.meta.total_count,
-              records: data.objects.slice(0, 10).map((obj) => {
-                const barcode =
-                  obj.catalogNumber ?? obj.catalognumber ?? '';
-                const objRecord = obj as Record<string, unknown>;
-                const ceRaw: unknown =
-                  objRecord.collectingevent ??
-                  objRecord.collectingEvent ??
-                  objRecord[subView!.name.toLowerCase()];
-                let ceId: number | undefined;
-                if (
-                  typeof ceRaw === 'object' &&
-                  ceRaw !== null &&
-                  'id' in ceRaw
-                ) {
-                  ceId = (ceRaw as { id: number }).id;
-                } else if (typeof ceRaw === 'string' && ceRaw.includes('/')) {
-                  ceId = Number.parseInt(
-                    ceRaw.split('/').filter(Boolean).pop()!,
-                    10
-                  );
-                } else if (typeof ceRaw === 'number') {
-                  ceId = ceRaw;
-                }
-                return {
-                  coId: obj.id,
-                  coLabel: barcode || `CO #${obj.id}`,
-                  ceId: Number.isNaN(ceId) ? undefined : ceId,
-                };
-              }),
-            }))
+            ).then(({ data }) => {
+              const parentTable = subView!.table.name;
+              const sharedTable = field.relatedTable.name;
+              return {
+                totalCount: data.meta.total_count,
+                records: data.objects.slice(0, 10).map((obj) => {
+                  const barcode =
+                    obj.catalogNumber ?? obj.catalognumber ?? '';
+                  const objRecord = obj as Record<string, unknown>;
+                  const relRaw: unknown =
+                    objRecord[subView!.name.toLowerCase()] ??
+                    objRecord[subView!.name];
+                  let relId: number | undefined;
+                  if (
+                    typeof relRaw === 'object' &&
+                    relRaw !== null &&
+                    'id' in relRaw
+                  ) {
+                    relId = (relRaw as { id: number }).id;
+                  } else if (typeof relRaw === 'string' && relRaw.includes('/')) {
+                    relId = Number.parseInt(
+                      relRaw.split('/').filter(Boolean).pop()!,
+                      10
+                    );
+                  } else if (typeof relRaw === 'number') {
+                    relId = relRaw;
+                  }
+                  return {
+                    parentId: obj.id,
+                    parentLabel: barcode || `${parentTable} #${obj.id}`,
+                    parentTableName: parentTable,
+                    sharedId: Number.isNaN(relId) ? undefined : relId,
+                    sharedTableName: sharedTable,
+                  };
+                }),
+              };
+            })
           : /* Fall back to querying the direct parent table */
             ajax<{
               readonly meta: { readonly total_count: number };
@@ -379,9 +388,11 @@ export function QueryComboBox({
             ).then(({ data }) => ({
               totalCount: data.meta.total_count,
               records: data.objects.slice(0, 10).map((obj) => ({
-                coId: undefined as number | undefined,
-                coLabel: undefined as string | undefined,
-                ceId: obj.id,
+                parentId: undefined as number | undefined,
+                parentLabel: undefined as string | undefined,
+                parentTableName: undefined as string | undefined,
+                sharedId: obj.id,
+                sharedTableName: resource!.specifyTable.name,
               })),
             }))
         ).then(({ totalCount, records }) => {
@@ -412,8 +423,10 @@ export function QueryComboBox({
   };
 
   const doCloneAndEdit = (): void => {
+    const relatedResource = formatted?.resource;
+    if (relatedResource === undefined) return;
     loading(
-      formatted!.resource!.clone(true).then((clonedResource) => {
+      relatedResource.clone(true).then((clonedResource) => {
         resource?.set(field.name, clonedResource as never);
         setState({
           type: 'AddResourceState',
@@ -425,7 +438,6 @@ export function QueryComboBox({
 
   const [rememberChoice, setRememberChoice] = React.useState(false);
 
-  const subViewRelationship = React.useContext(SubViewContext)?.relationship;
   const pendingValueRef = React.useRef('');
 
   const relatedTable =
@@ -832,31 +844,34 @@ export function QueryComboBox({
               })}
             </p>
             <p className="mt-1 text-xs text-gray-500">
-              {'Links open in a new tab for inspection only \u2014 no changes will be made.'}
+              {formsText.linksForInspectionOnly()}
             </p>
             {state.sharingRecords.length > 0 && (
               <table className="mt-2 text-sm w-full">
                 <thead>
                   <tr className="text-left text-xs text-gray-500">
-                    {state.sharingRecords.some((r) => r.coId !== undefined) && (
-                      <th className="pr-4 font-normal">{'Collection Object'}</th>
+                    {state.sharingRecords.some((r) => r.parentId !== undefined) && (
+                      <th className="pr-4 font-normal">
+                        {state.sharingRecords.find((r) => r.parentTableName)?.parentTableName
+                          ?? resource!.specifyTable.label}
+                      </th>
                     )}
-                    <th className="font-normal">{'Collecting Event'}</th>
+                    <th className="font-normal">{field.relatedTable.label}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {state.sharingRecords.map((record, index) => (
-                    <tr key={record.coId ?? record.ceId ?? index}>
-                      {state.sharingRecords.some((r) => r.coId !== undefined) && (
+                    <tr key={record.parentId ?? record.sharedId ?? index}>
+                      {state.sharingRecords.some((r) => r.parentId !== undefined) && (
                         <td className="pr-4 py-0.5">
-                          {record.coId !== undefined ? (
+                          {record.parentId !== undefined && record.parentTableName !== undefined ? (
                             <a
                               className="text-blue-600 underline hover:text-blue-800"
-                              href={`/specify/view/collectionobject/${record.coId}/`}
+                              href={`/specify/view/${record.parentTableName.toLowerCase()}/${record.parentId}/`}
                               target="_blank"
                               rel="noopener noreferrer"
                             >
-                              {record.coLabel}
+                              {record.parentLabel}
                             </a>
                           ) : (
                             '\u2014'
@@ -864,14 +879,14 @@ export function QueryComboBox({
                         </td>
                       )}
                       <td className="py-0.5">
-                        {record.ceId !== undefined ? (
+                        {record.sharedId !== undefined ? (
                           <a
                             className="text-blue-600 underline hover:text-blue-800"
-                            href={`/specify/view/collectingevent/${record.ceId}/`}
+                            href={`/specify/view/${record.sharedTableName.toLowerCase()}/${record.sharedId}/`}
                             target="_blank"
                             rel="noopener noreferrer"
                           >
-                            {`CE #${record.ceId}`}
+                            {`${record.sharedTableName} #${record.sharedId}`}
                           </a>
                         ) : (
                           '\u2014'
@@ -884,7 +899,7 @@ export function QueryComboBox({
             )}
             {state.sharingCount > 10 && (
               <p className="mt-1 text-xs text-gray-500">
-                {`\u2026 and ${state.sharingCount - 10} more`}
+                {formsText.andNMore({ count: (state.sharingCount - 10).toString() })}
               </p>
             )}
             <label className="mt-3 flex items-center gap-2 text-sm cursor-pointer">
