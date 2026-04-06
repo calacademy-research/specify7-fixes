@@ -90,18 +90,21 @@ class Migration(migrations.Migration):
             index=models.Index(fields=['guid'], name='COGuidIDX'),
         ),
 
-        # -- Compound index: determination lookups by current + collection --
+        # -- Compound index: determination lookups by collection + current --
         migrations.AddIndex(
             model_name='determination',
             index=models.Index(
-                fields=['iscurrent', 'collectionmemberid'],
-                name='DetCurrColMemIDX',
+                fields=['collectionmemberid', 'iscurrent'],
+                name='DetColMemCurrIDX',
             ),
         ),
 
-        # -- Boolean index: CoJo primary flag --
+        # -- Compound index: CoJo lookups by parent COG + primary flag --
         migrations.AddIndex(
             model_name='collectionobjectgroupjoin',
-            index=models.Index(fields=['isprimary'], name='CojoIsPrimaryIDX'),
+            index=models.Index(
+                fields=['parentcog', 'isprimary'],
+                name='CojoParentPrimaryIDX',
+            ),
         ),
     ]
