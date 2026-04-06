@@ -34,3 +34,25 @@ docker-compose.yml
 .claude/
 DWC_PIPELINE.md
 test_*.csv
+.hypothesis/
+
+# Test/dev artifacts
+eyetest-results/
+carry-forward-screenshots/
+demo-screenshots/
+doc-screenshots/
+test-results/
+*.mjs
+build-demo-docx.py
+demo-screenshots.spec.ts
+specifyweb/frontend/js_src/eyetest-*
+specifyweb/frontend/js_src/test-results/
+
+# Generated/binary artifacts
+*.jar
+*.docx
+
+# Working notes (kept locally, not in PR)
+SPECIFY7-DWC-*.md
+BACKLOG.md
+EYETEST-*.md

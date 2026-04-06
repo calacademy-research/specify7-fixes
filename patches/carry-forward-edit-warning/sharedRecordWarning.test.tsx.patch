@@ -1,0 +1,56 @@
+diff --git a/specifyweb/frontend/js_src/lib/components/QueryComboBox/__tests__/sharedRecordWarning.test.tsx b/specifyweb/frontend/js_src/lib/components/QueryComboBox/__tests__/sharedRecordWarning.test.tsx
+new file mode 100644
+index 0000000000..90ded3ed44
+--- /dev/null
++++ b/specifyweb/frontend/js_src/lib/components/QueryComboBox/__tests__/sharedRecordWarning.test.tsx
+@@ -0,0 +1,50 @@
++/**
++ * Tests for shared record edit warning (#597).
++ *
++ * When using Carry Forward, Specify copies foreign keys — so multiple
++ * Collection Objects share the same Locality via their Collecting Event.
++ * Clicking the pencil (edit) icon on a non-dependent QueryComboBox field
++ * mutates the shared record, silently changing data for all referencing
++ * records.
++ *
++ * The fix shows a warning dialog before editing non-dependent related
++ * records, offering Clone and Edit as the primary safe action.
++ */
++
++import { requireContext } from '../../../tests/helpers';
++import { formsText } from '../../../localization/forms';
++
++requireContext();
++
++describe('Shared record edit warning', () => {
++  test('localization strings exist for the warning dialog', () => {
++    expect(typeof formsText.sharedRecordWarning()).toBe('string');
++    expect(formsText.sharedRecordWarning().length).toBeGreaterThan(0);
++
++    expect(
++      typeof formsText.sharedRecordWarningDescription({
++        tableName: 'Locality',
++      })
++    ).toBe('string');
++
++    expect(typeof formsText.editShared()).toBe('string');
++    expect(formsText.editShared().length).toBeGreaterThan(0);
++
++    expect(typeof formsText.cloneAndEdit()).toBe('string');
++    expect(formsText.cloneAndEdit().length).toBeGreaterThan(0);
++  });
++
++  test('warning description includes the table name', () => {
++    const description = formsText.sharedRecordWarningDescription({
++      tableName: 'Locality',
++    });
++    expect(description).toContain('Locality');
++  });
++
++  test('warning description includes the table name for other tables', () => {
++    const description = formsText.sharedRecordWarningDescription({
++      tableName: 'Agent',
++    });
++    expect(description).toContain('Agent');
++  });
++});
