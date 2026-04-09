@@ -30,7 +30,7 @@ def drop_old_indexes(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('specify', '0047_add_tree_performance_indexes'),
+        ('specify', '0048_add_tree_performance_indexes'),
     ]
 
     operations = [

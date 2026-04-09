@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('specify', '0044_alter_deletion_cascade'),
+        ('specify', '0047_spqueryfield_dwc_extensions'),
     ]
 
     operations = [

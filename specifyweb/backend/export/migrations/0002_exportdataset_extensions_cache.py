@@ -7,7 +7,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('export', '0001_schemamapping'),
-        ('specify', '0044_alter_deletion_cascade'),
+        ('specify', '0047_spqueryfield_dwc_extensions'),
     ]
 
     operations = [

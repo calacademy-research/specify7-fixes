@@ -12,7 +12,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('specify', '0046_spqueryfield_dwc_extensions'),
+        ('specify', '0047_spqueryfield_dwc_extensions'),
     ]
 
     operations = [
